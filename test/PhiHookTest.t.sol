@@ -10,38 +10,33 @@ import {ModifyLiquidityParams, SwapParams} from "../lib/v4-core/src/types/PoolOp
 import {PhiHook} from "../src/PhiHook.sol";
 import {PhiMath} from "../src/PhiMath.sol";
 
-contract MockPoolManager {
+contract MockPM {
     function mint(address, uint256, uint256) external {}
     function burn(address, uint256, uint256) external {}
     function unlock(bytes calldata data) external returns (bytes memory) {
-        // نستدعي _unlockCallback على المرسل
-        return IUnlockCBHook(msg.sender).unlockCallback(data);
+        return IUnlockCB(msg.sender).unlockCallback(data);
     }
     function take(Currency, address, uint256) external {}
 }
-
-interface IUnlockCBHook {
-    function unlockCallback(bytes calldata) external returns (bytes memory);
-}
+interface IUnlockCB { function unlockCallback(bytes calldata) external returns (bytes memory); }
 
 contract PhiHookTest is Test {
+    using CurrencyLibrary for Currency;
+
     PhiHook hook;
-    address mockManager;
+    address pm;
     address lp  = address(0xBEEF);
     address lp2 = address(0xCAFE);
 
-    PoolKey key;
-    bytes32 poolId;
-
-    // tick range utilisé dans tous les tests
-    int24 constant TICK_LOWER = -60;
-    int24 constant TICK_UPPER =  60;
+    PoolKey  key;
+    bytes32  poolId;
+    int24 constant TL = -60;
+    int24 constant TU =  60;
 
     function setUp() public {
-        mockManager = address(new MockPoolManager());
-        hook = new PhiHook(IPoolManager(mockManager));
-
-        key = PoolKey({
+        pm   = address(new MockPM());
+        hook = new PhiHook(IPoolManager(pm));
+        key  = PoolKey({
             currency0:   Currency.wrap(address(0x1)),
             currency1:   Currency.wrap(address(0x2)),
             fee:         3000,
@@ -51,48 +46,53 @@ contract PhiHookTest is Test {
         poolId = keccak256(abi.encode(key));
     }
 
-    // ─── helpers ──────────────────────────────────────────────────
     function _add(address _lp, uint128 liq, uint8 tier) internal {
         ModifyLiquidityParams memory p = ModifyLiquidityParams({
-            tickLower:      TICK_LOWER,
-            tickUpper:      TICK_UPPER,
-            liquidityDelta: int256(uint256(liq)),
-            salt:           0
+            tickLower: TL, tickUpper: TU,
+            liquidityDelta: int256(uint256(liq)), salt: 0
         });
         bytes memory hd = tier == hook.DEFAULT_FIB_TIER()
             ? bytes("") : abi.encodePacked(tier);
-        vm.prank(mockManager);
+        vm.prank(pm);
         hook.afterAddLiquidity(_lp, key, p,
             BalanceDelta.wrap(0), BalanceDelta.wrap(0), hd);
     }
 
-    function _remove(address _lp, uint128 liq, BalanceDelta lpDelta)
+    function _remove(address _lp, uint128 liq, int128 proc)
         internal returns (BalanceDelta)
     {
         ModifyLiquidityParams memory p = ModifyLiquidityParams({
-            tickLower:      TICK_LOWER,
-            tickUpper:      TICK_UPPER,
-            liquidityDelta: -int256(uint256(liq)),
-            salt:           0
+            tickLower: TL, tickUpper: TU,
+            liquidityDelta: -int256(uint256(liq)), salt: 0
         });
-        vm.prank(mockManager);
+        BalanceDelta lpDelta = BalanceDelta.wrap((int256(proc) << 128) | 0);
+        vm.prank(pm);
         hook.beforeRemoveLiquidity(_lp, key, p, "");
-        vm.prank(mockManager);
-        (, BalanceDelta delta) = hook.afterRemoveLiquidity(
+        vm.prank(pm);
+        (, BalanceDelta d) = hook.afterRemoveLiquidity(
             _lp, key, p, lpDelta, BalanceDelta.wrap(0), "");
-        return delta;
+        return d;
     }
 
-    // lpDelta simulant 500e18 token0 restitués au LP
-    function _deltaWith500() internal pure returns (BalanceDelta) {
-        return BalanceDelta.wrap((int256(500e18) << 128) | int256(0));
+    function _swap(int128 a0) internal {
+        SwapParams memory sp = SwapParams({
+            zeroForOne: true, amountSpecified: int256(a0), sqrtPriceLimitX96: 0
+        });
+        BalanceDelta sd = BalanceDelta.wrap((int256(a0) << 128) | 0);
+        vm.prank(pm);
+        hook.afterSwap(address(0), key, sp, sd, "");
+    }
+
+    function _swapParams() internal pure returns (SwapParams memory) {
+        return SwapParams({
+            zeroForOne: true, amountSpecified: -int256(10_000e18), sqrtPriceLimitX96: 0
+        });
     }
 
     // ─── registration ─────────────────────────────────────────────
     function test_register_new_position() public {
         _add(lp, 1000e18, 3);
-        PhiHook.LPPosition memory pos =
-            hook.getPosition(lp, poolId, TICK_LOWER, TICK_UPPER);
+        PhiHook.LPPosition memory pos = hook.getPosition(lp, poolId, TL, TU);
         assertEq(pos.fibTier,   3);
         assertEq(pos.liquidity, 1000e18);
         assertEq(pos.entryTime, block.timestamp);
@@ -100,181 +100,175 @@ contract PhiHookTest is Test {
 
     function test_register_custom_tier() public {
         _add(lp, 500e18, 7);
-        assertEq(
-            hook.getPosition(lp, poolId, TICK_LOWER, TICK_UPPER).fibTier, 7);
+        assertEq(hook.getPosition(lp, poolId, TL, TU).fibTier, 7);
     }
 
     function test_invalid_tier_reverts() public {
         uint8 def = hook.DEFAULT_FIB_TIER();
         require(def == 3);
         ModifyLiquidityParams memory p = ModifyLiquidityParams({
-            tickLower: TICK_LOWER, tickUpper: TICK_UPPER,
+            tickLower: TL, tickUpper: TU,
             liquidityDelta: int256(uint256(uint128(100e18))), salt: 0
         });
         vm.expectRevert(
-            abi.encodeWithSelector(
-                PhiHook.PhiHook__InvalidFibTier.selector, uint8(12)));
-        vm.prank(mockManager);
+            abi.encodeWithSelector(PhiHook.PhiHook__InvalidFibTier.selector, uint8(12)));
+        vm.prank(pm);
         hook.afterAddLiquidity(lp, key, p,
             BalanceDelta.wrap(0), BalanceDelta.wrap(0),
             abi.encodePacked(uint8(12)));
     }
 
-    // ─── multi-position ───────────────────────────────────────────
     function test_add_on_existing_preserves_entry_time() public {
         _add(lp, 1000e18, 3);
-        uint64 entryTime =
-            hook.getPosition(lp, poolId, TICK_LOWER, TICK_UPPER).entryTime;
+        uint64 t = hook.getPosition(lp, poolId, TL, TU).entryTime;
         vm.warp(block.timestamp + 5 days);
         _add(lp, 500e18, 3);
-        PhiHook.LPPosition memory pos =
-            hook.getPosition(lp, poolId, TICK_LOWER, TICK_UPPER);
-        assertEq(pos.entryTime, entryTime);
-        assertEq(pos.liquidity, 1500e18);
+        assertEq(hook.getPosition(lp, poolId, TL, TU).entryTime, t);
+        assertEq(hook.getPosition(lp, poolId, TL, TU).liquidity, 1500e18);
     }
 
     function test_add_on_existing_preserves_tier() public {
         _add(lp, 1000e18, 7);
         vm.warp(block.timestamp + 1 days);
         _add(lp, 500e18, 3);
-        assertEq(
-            hook.getPosition(lp, poolId, TICK_LOWER, TICK_UPPER).fibTier, 7);
+        assertEq(hook.getPosition(lp, poolId, TL, TU).fibTier, 7);
     }
 
     // ─── timeToGate ───────────────────────────────────────────────
     function test_timeToGate_full_at_entry() public {
         _add(lp, 100e18, 3);
-        assertEq(
-            hook.timeToGate(lp, poolId, TICK_LOWER, TICK_UPPER), 3 days);
+        assertEq(hook.timeToGate(lp, poolId, TL, TU), 3 days);
     }
 
     function test_timeToGate_zero_after_gate() public {
         _add(lp, 100e18, 3);
         vm.warp(block.timestamp + 3 days + 1);
-        assertEq(
-            hook.timeToGate(lp, poolId, TICK_LOWER, TICK_UPPER), 0);
+        assertEq(hook.timeToGate(lp, poolId, TL, TU), 0);
     }
 
     function test_timeToGate_decreasing() public {
         _add(lp, 100e18, 3);
-        uint256 t1 = hook.timeToGate(lp, poolId, TICK_LOWER, TICK_UPPER);
+        uint256 t1 = hook.timeToGate(lp, poolId, TL, TU);
         vm.warp(block.timestamp + 1 days);
-        assertTrue(
-            hook.timeToGate(lp, poolId, TICK_LOWER, TICK_UPPER) < t1);
+        assertTrue(hook.timeToGate(lp, poolId, TL, TU) < t1);
     }
 
     // ─── currentMultiplier ────────────────────────────────────────
     function test_multiplier_one_at_entry() public {
         _add(lp, 100e18, 3);
-        assertEq(
-            hook.currentMultiplier(lp, poolId, TICK_LOWER, TICK_UPPER),
-            PhiMath.SCALE);
+        assertEq(hook.currentMultiplier(lp, poolId, TL, TU), PhiMath.SCALE);
     }
 
     function test_multiplier_phi_after_one_T60() public {
         _add(lp, 100e18, 3);
         vm.warp(block.timestamp + PhiMath.T60 + 1);
-        assertApproxEqAbs(
-            hook.currentMultiplier(lp, poolId, TICK_LOWER, TICK_UPPER),
-            PhiMath.PHI, 2);
+        assertApproxEqAbs(hook.currentMultiplier(lp, poolId, TL, TU), PhiMath.PHI, 2);
     }
 
     function test_multiplier_phi_sq_after_two_T60() public {
         _add(lp, 100e18, 3);
         vm.warp(block.timestamp + 2 * PhiMath.T60 + 1);
         assertApproxEqAbs(
-            hook.currentMultiplier(lp, poolId, TICK_LOWER, TICK_UPPER),
+            hook.currentMultiplier(lp, poolId, TL, TU),
             PhiMath.PHI + PhiMath.SCALE, 4);
     }
 
-    // ─── early exit fee ───────────────────────────────────────────
+    // ─── early exit ───────────────────────────────────────────────
     function test_early_exit_charges_fee() public {
         _add(lp, 1000e18, 7);
         vm.warp(block.timestamp + 5 days);
-        _remove(lp, 1000e18, _deltaWith500());
-        assertTrue(hook.accruedFees(poolId) > 0);
+        _remove(lp, 1000e18, 500e18);
+        (,, uint256 rewardBalance) = hook.rewardPools(poolId);
+        assertTrue(rewardBalance > 0);
     }
 
     function test_early_exit_fee_in_delta() public {
         _add(lp, 1000e18, 7);
         vm.warp(block.timestamp + 5 days);
-        BalanceDelta delta = _remove(lp, 1000e18, _deltaWith500());
-        assertTrue(delta.amount0() < 0);
+        BalanceDelta d = _remove(lp, 1000e18, 500e18);
+        assertTrue(d.amount0() < 0);
     }
 
     function test_no_fee_after_gate() public {
         _add(lp, 1000e18, 7);
         vm.warp(block.timestamp + 21 days + 1);
-        BalanceDelta delta = _remove(lp, 1000e18, _deltaWith500());
-        assertEq(delta.amount0(), 0);
+        BalanceDelta d = _remove(lp, 1000e18, 500e18);
+        assertEq(d.amount0(), 0);
         assertEq(hook.accruedFees(poolId), 0);
     }
 
     function test_fee_decreases_with_time() public {
         _add(lp, 1000e18, 7);
         vm.warp(block.timestamp + 5 days);
-        BalanceDelta d1 = _remove(lp, 1000e18, _deltaWith500());
+        BalanceDelta d1 = _remove(lp, 1000e18, 500e18);
         uint256 fee1 = uint256(uint128(-d1.amount0()));
 
         _add(lp2, 1000e18, 7);
         vm.warp(block.timestamp + 15 days);
-        BalanceDelta d2 = _remove(lp2, 1000e18, _deltaWith500());
+        BalanceDelta d2 = _remove(lp2, 1000e18, 500e18);
         uint256 fee2 = uint256(uint128(-d2.amount0()));
-
         assertTrue(fee1 > fee2);
     }
 
     function test_fee_applied_on_real_tokens_not_L() public {
-        // الرسوم تُحسب على delta.amount0() الحقيقي وليس على liquidity
         _add(lp, 1000e18, 7);
         vm.warp(block.timestamp + 5 days);
-
-        // delta صغير → رسوم صغيرة
-        BalanceDelta smallDelta = BalanceDelta.wrap(
-            (int256(10e18) << 128) | int256(0));
-        BalanceDelta d = _remove(lp, 1000e18, smallDelta);
-        uint256 feeSmall = uint256(uint128(-d.amount0()));
+        BalanceDelta d1 = _remove(lp, 1000e18, 10e18);
+        uint256 feeSmall = uint256(uint128(-d1.amount0()));
 
         _add(lp2, 1000e18, 7);
         vm.warp(block.timestamp + 5 days);
-
-        // delta كبير → رسوم أكبر
-        BalanceDelta largeDelta = BalanceDelta.wrap(
-            (int256(500e18) << 128) | int256(0));
-        BalanceDelta d2 = _remove(lp2, 1000e18, largeDelta);
+        BalanceDelta d2 = _remove(lp2, 1000e18, 500e18);
         uint256 feeLarge = uint256(uint128(-d2.amount0()));
-
         assertTrue(feeLarge > feeSmall);
     }
 
-    // ─── no position reverts ──────────────────────────────────────
+    // ─── no position ──────────────────────────────────────────────
     function test_no_position_reverts() public {
         ModifyLiquidityParams memory p = ModifyLiquidityParams({
-            tickLower: TICK_LOWER, tickUpper: TICK_UPPER,
-            liquidityDelta: -1e18, salt: 0
+            tickLower: TL, tickUpper: TU, liquidityDelta: -1e18, salt: 0
         });
         vm.expectRevert(PhiHook.PhiHook__PositionNotFound.selector);
-        vm.prank(mockManager);
+        vm.prank(pm);
         hook.beforeRemoveLiquidity(address(0xDEAD), key, p, "");
     }
 
     // ─── onlyPoolManager ──────────────────────────────────────────
     function test_non_manager_reverts() public {
         ModifyLiquidityParams memory p = ModifyLiquidityParams({
-            tickLower: TICK_LOWER, tickUpper: TICK_UPPER,
-            liquidityDelta: 1e18, salt: 0
+            tickLower: TL, tickUpper: TU, liquidityDelta: 1e18, salt: 0
         });
         vm.expectRevert();
         hook.afterAddLiquidity(lp, key, p,
             BalanceDelta.wrap(0), BalanceDelta.wrap(0), "");
     }
 
+    // ─── afterSwap ────────────────────────────────────────────────
+    function test_afterSwap_accrues_fee() public {
+        _add(lp, 1000e18, 3);
+        _swap(10_000e18); // a0 > 0 → token0 into pool
+
+        uint256 lpFee       = uint256(10_000e18) * 3000 / 1_000_000;
+        uint256 protocolFee = lpFee * 3820 / 10_000;
+        uint256 expected    = protocolFee * (10_000 - 6180) / 10_000;
+        assertEq(hook.accruedFees(poolId), expected);
+    }
+
+    function test_afterSwap_no_fee_on_positive_delta() public {
+        _add(lp, 1000e18, 3);
+        SwapParams memory sp = SwapParams({
+            zeroForOne: false, amountSpecified: int256(10_000e18), sqrtPriceLimitX96: 0
+        });
+        // both a0=0, a1=0 → no fee
+        vm.prank(pm);
+        hook.afterSwap(address(0), key, sp, BalanceDelta.wrap(0), "");
+        assertEq(hook.accruedFees(poolId), 0);
+    }
+
     // ─── collectFees ──────────────────────────────────────────────
     function test_collect_only_owner() public {
-        _add(lp, 1000e18, 7);
-        vm.warp(block.timestamp + 5 days);
-        _remove(lp, 1000e18, _deltaWith500());
-
+        _add(lp, 1000e18, 3);
+        _swap(10_000e18);
         vm.expectRevert(PhiHook.PhiHook__NotAuthorized.selector);
         vm.prank(address(0xBAD));
         hook.collectFees(poolId, Currency.wrap(address(0x1)), address(0xBAD));
@@ -286,17 +280,12 @@ contract PhiHookTest is Test {
     }
 
     function test_collect_clears_balance() public {
-        _add(lp, 1000e18, 7);
-        vm.warp(block.timestamp + 5 days);
-        _remove(lp, 1000e18, _deltaWith500());
+        _add(lp, 1000e18, 3);
+        _swap(10_000e18);
         assertTrue(hook.accruedFees(poolId) > 0);
-
-        // collectFees appelle poolManager.unlock() → MockPoolManager ne fait rien
-        // on teste juste que accruedFees est remis à zéro (CEI)
         try hook.collectFees(
             poolId, Currency.wrap(address(0x1)), address(this)
         ) {} catch {}
-
         assertEq(hook.accruedFees(poolId), 0);
     }
 
@@ -315,40 +304,5 @@ contract PhiHookTest is Test {
     // ─── HOOK_FLAGS ───────────────────────────────────────────────
     function test_hook_flags_value() public view {
         assertEq(hook.HOOK_FLAGS(), uint160(0x641));
-    }
-
-    // ─── afterSwap protocol fee ───────────────────────────────────
-    function test_afterSwap_accrues_fee() public {
-        // delta.amount0() < 0 → pool reçoit token0
-        BalanceDelta swapDelta = BalanceDelta.wrap(
-            (int256(-10_000e18) << 128) | int256(0));
-
-        vm.prank(mockManager);
-        hook.afterSwap(address(0), key,
-            _swapParams(), swapDelta, "");
-
-        // lpFee = 10_000e18 × 3000 / 1_000_000 = 30e18
-        // protocolFee = 30e18 × 382 / 10_000 = 1.146e18
-        uint256 expected = (10_000e18 * 3000 / 1_000_000) * 3_820 / 10_000;
-        assertEq(hook.accruedFees(poolId), expected);
-    }
-
-    function test_afterSwap_no_fee_on_positive_delta() public {
-        // amount0 > 0 → pas de frais
-        BalanceDelta swapDelta = BalanceDelta.wrap(
-            (int256(10_000e18) << 128) | int256(0));
-        vm.prank(mockManager);
-        hook.afterSwap(address(0), key, _swapParams(), swapDelta, "");
-        assertEq(hook.accruedFees(poolId), 0);
-    }
-
-    // ─── helper ───────────────────────────────────────────────────
-    function _swapParams() internal pure returns (SwapParams memory)
-    {
-        return SwapParams({
-            zeroForOne:        true,
-            amountSpecified:   -int256(10_000e18),
-            sqrtPriceLimitX96: 0
-        });
     }
 }
