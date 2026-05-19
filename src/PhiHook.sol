@@ -112,9 +112,9 @@ contract PhiHook is IHooks, SafeCallback {
 
     // ─── Constructor ──────────────────────────────────────────────
 
-    constructor(IPoolManager _manager) SafeCallback(_manager) {
-        owner = msg.sender;
-    }
+    constructor(IPoolManager _manager, address _owner) SafeCallback(_manager) {
+    owner = _owner; 
+}
 
     // ─── IHooks stubs ─────────────────────────────────────────────
 
