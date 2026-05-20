@@ -36,7 +36,7 @@ contract DeployPhiHook is Script {
 
         vm.startBroadcast();
 
-        PhiHook hook = new PhiHook{salt: salt}(IPoolManager(POOL_MANAGER));
+        PhiHook hook = new PhiHook{salt: salt}(IPoolManager(POOL_MANAGER), msg.sender);
         console.log("Deployed at:      ", address(hook));
 
         // التحقق من الـ flags فقط (العنوان قد يختلف طفيفاً بسبب deployer)

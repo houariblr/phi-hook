@@ -2,16 +2,17 @@
 pragma solidity ^0.8.24;
 
 import {IHooks}          from "../lib/v4-core/src/interfaces/IHooks.sol";
-import {IPoolManager}    from "../lib/v4-core/src/interfaces/IPoolManager.sol";
-import {PoolKey}         from "../lib/v4-core/src/types/PoolKey.sol";
+
+import {PoolKey} from "../lib/v4-core/src/types/PoolKey.sol";
 import {BalanceDelta, toBalanceDelta} from "../lib/v4-core/src/types/BalanceDelta.sol";
 import {BeforeSwapDelta, BeforeSwapDeltaLibrary} from "../lib/v4-core/src/types/BeforeSwapDelta.sol";
 import {Currency, CurrencyLibrary} from "../lib/v4-core/src/types/Currency.sol";
-import {ModifyLiquidityParams, SwapParams} from "../lib/v4-core/src/types/PoolOperation.sol";
+
 import {SafeCallback}    from "../lib/v4-periphery/src/base/SafeCallback.sol";
 import {PhiMath}         from "./PhiMath.sol";
 import {PhiRewards}      from "./PhiRewards.sol";
-
+import {IPoolManager} from "../lib/v4-core/src/interfaces/IPoolManager.sol";
+import {IPoolManager} from "../lib/v4-core/src/interfaces/IPoolManager.sol";
 /// @title  PhiHook
 /// @notice Uniswap V4 Hook implementing Fibonacci time-gates and φ-weighted LP rewards.
 ///
@@ -127,7 +128,7 @@ contract PhiHook is IHooks, SafeCallback {
     { return IHooks.afterInitialize.selector; }
 
     function beforeAddLiquidity(
-        address, PoolKey calldata, ModifyLiquidityParams calldata, bytes calldata
+        address, PoolKey calldata, IPoolManager.ModifyLiquidityParams calldata, bytes calldata
     ) external pure override returns (bytes4)
     { return IHooks.beforeAddLiquidity.selector; }
 
@@ -137,7 +138,7 @@ contract PhiHook is IHooks, SafeCallback {
     function afterAddLiquidity(
         address sender,
         PoolKey calldata key,
-        ModifyLiquidityParams calldata params,
+        IPoolManager.ModifyLiquidityParams calldata params,
         BalanceDelta, BalanceDelta,
         bytes calldata hookData
     ) external override onlyPoolManager returns (bytes4, BalanceDelta) {
@@ -166,7 +167,7 @@ contract PhiHook is IHooks, SafeCallback {
     function beforeRemoveLiquidity(
         address sender,
         PoolKey calldata key,
-        ModifyLiquidityParams calldata params,
+        IPoolManager.ModifyLiquidityParams calldata params,
         bytes calldata
     ) external override onlyPoolManager returns (bytes4) {
         // slither-disable-next-line timestamp
@@ -179,7 +180,7 @@ contract PhiHook is IHooks, SafeCallback {
     function afterRemoveLiquidity(
         address sender,
         PoolKey calldata key,
-        ModifyLiquidityParams calldata params,
+        IPoolManager.ModifyLiquidityParams calldata params,
         BalanceDelta delta, BalanceDelta,
         bytes calldata
     ) external override onlyPoolManager returns (bytes4, BalanceDelta) {
@@ -197,7 +198,7 @@ contract PhiHook is IHooks, SafeCallback {
 
     // ─── Swap ─────────────────────────────────────────────────────
 
-    function beforeSwap(address, PoolKey calldata, SwapParams calldata, bytes calldata)
+    function beforeSwap(address, PoolKey calldata, IPoolManager.SwapParams calldata, bytes calldata)
         external pure override returns (bytes4, BeforeSwapDelta, uint24)
     { return (IHooks.beforeSwap.selector, BeforeSwapDeltaLibrary.ZERO_DELTA, 0); }
 
@@ -211,7 +212,7 @@ contract PhiHook is IHooks, SafeCallback {
     function afterSwap(
         address,
         PoolKey calldata key,
-        SwapParams calldata,
+        IPoolManager.SwapParams calldata,
         BalanceDelta delta,
         bytes calldata
     ) external override onlyPoolManager returns (bytes4, int128) {
