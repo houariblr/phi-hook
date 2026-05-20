@@ -3,10 +3,12 @@ pragma solidity ^0.8.24;
 
 import "forge-std/Test.sol";
 import {IPoolManager} from "../lib/v4-core/src/interfaces/IPoolManager.sol";
+import {ModifyLiquidityParams, SwapParams} from "../lib/v4-core/src/types/PoolOperation.sol";
 import {PoolKey} from "../lib/v4-core/src/types/PoolKey.sol";
 import {Currency} from "../lib/v4-core/src/types/Currency.sol";
 import {BalanceDelta} from "../lib/v4-core/src/types/BalanceDelta.sol";
 import {IPoolManager} from "../lib/v4-core/src/interfaces/IPoolManager.sol";
+import {ModifyLiquidityParams, SwapParams} from "../lib/v4-core/src/types/PoolOperation.sol";
 import {PhiHook} from "../src/PhiHook.sol";
 import {FeeCollector} from "../src/FeeCollector.sol";
 import {PhiMath} from "../src/PhiMath.sol";
@@ -61,7 +63,7 @@ contract FeeCollectorTest is Test {
     /// @dev génère des treasury fees via afterSwap (a0 > 0 = token0 into pool)
     function _generateFees() internal returns (uint256) {
         // add liquidity first
-        IPoolManager.ModifyLiquidityParams memory p = IPoolManager.ModifyLiquidityParams({
+        ModifyLiquidityParams memory p = ModifyLiquidityParams({
             tickLower: -60, tickUpper: 60,
             liquidityDelta: int256(uint256(1000e18)), salt: 0
         });
@@ -70,7 +72,7 @@ contract FeeCollectorTest is Test {
             BalanceDelta.wrap(0), BalanceDelta.wrap(0), "");
 
         // swap: a0 > 0 → token0 into pool → fee applies
-        IPoolManager.SwapParams memory sp = IPoolManager.SwapParams({
+        SwapParams memory sp = SwapParams({
             zeroForOne: true,
             amountSpecified: int256(100_000e18),
             sqrtPriceLimitX96: 0

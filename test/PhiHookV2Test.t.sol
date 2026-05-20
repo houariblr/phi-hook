@@ -3,10 +3,12 @@ pragma solidity ^0.8.24;
 
 import "forge-std/Test.sol";
 import {IPoolManager} from "../lib/v4-core/src/interfaces/IPoolManager.sol";
+import {ModifyLiquidityParams, SwapParams} from "../lib/v4-core/src/types/PoolOperation.sol";
 import {PoolKey} from "../lib/v4-core/src/types/PoolKey.sol";
 import {Currency} from "../lib/v4-core/src/types/Currency.sol";
 import {BalanceDelta} from "../lib/v4-core/src/types/BalanceDelta.sol";
 import {IPoolManager} from "../lib/v4-core/src/interfaces/IPoolManager.sol";
+import {ModifyLiquidityParams, SwapParams} from "../lib/v4-core/src/types/PoolOperation.sol";
 import {PhiHook} from "../src/PhiHook.sol";
 import {PhiRewards} from "../src/PhiRewards.sol";
 import {PhiMath} from "../src/PhiMath.sol";
@@ -71,7 +73,7 @@ contract PhiHookV2Test is Test {
 
     // ─── helpers ──────────────────────────────────────────────────
     function _add(address _lp, uint128 liq, uint8 tier) internal {
-        IPoolManager.ModifyLiquidityParams memory p = IPoolManager.ModifyLiquidityParams({
+        ModifyLiquidityParams memory p = ModifyLiquidityParams({
             tickLower: TL, tickUpper: TU,
             liquidityDelta: int256(uint256(liq)), salt: 0
         });
@@ -85,7 +87,7 @@ contract PhiHookV2Test is Test {
     function _remove(address _lp, uint128 liq, int128 proceeds0)
         internal returns (BalanceDelta)
     {
-        IPoolManager.ModifyLiquidityParams memory p = IPoolManager.ModifyLiquidityParams({
+        ModifyLiquidityParams memory p = ModifyLiquidityParams({
             tickLower: TL, tickUpper: TU,
             liquidityDelta: -int256(uint256(liq)), salt: 0
         });
@@ -100,7 +102,7 @@ contract PhiHookV2Test is Test {
     }
 
     function _swap(int128 amount0In) internal {
-        IPoolManager.SwapParams memory sp = IPoolManager.SwapParams({
+        SwapParams memory sp = SwapParams({
             zeroForOne: true,
             amountSpecified: int256(amount0In),
             sqrtPriceLimitX96: 0
@@ -165,7 +167,7 @@ contract PhiHookV2Test is Test {
 
     function test_v2_swap_no_fee_zero_delta() public {
         _add(lp, 1000e18, 3);
-        IPoolManager.SwapParams memory sp = IPoolManager.SwapParams({
+        SwapParams memory sp = SwapParams({
             zeroForOne: true, amountSpecified: 0, sqrtPriceLimitX96: 0
         });
         vm.prank(address(pm));
@@ -327,7 +329,7 @@ contract PhiHookV2Test is Test {
 
     // ─── position not found ───────────────────────────────────────
     function test_v2_remove_no_position_reverts() public {
-        IPoolManager.ModifyLiquidityParams memory p = IPoolManager.ModifyLiquidityParams({
+        ModifyLiquidityParams memory p = ModifyLiquidityParams({
             tickLower: TL, tickUpper: TU,
             liquidityDelta: -1e18, salt: 0
         });
