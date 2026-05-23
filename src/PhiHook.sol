@@ -13,8 +13,6 @@ import {PhiMath}         from "./PhiMath.sol";
 import {PhiRewards}      from "./PhiRewards.sol";
 import {IPoolManager} from "../lib/v4-core/src/interfaces/IPoolManager.sol";
 import {ModifyLiquidityParams, SwapParams} from "../lib/v4-core/src/types/PoolOperation.sol";
-import {IPoolManager} from "../lib/v4-core/src/interfaces/IPoolManager.sol";
-import {ModifyLiquidityParams, SwapParams} from "../lib/v4-core/src/types/PoolOperation.sol";
 /// @title  PhiHook
 /// @notice Uniswap V4 Hook implementing Fibonacci time-gates and φ-weighted LP rewards.
 ///
@@ -116,8 +114,8 @@ contract PhiHook is IHooks, SafeCallback {
     // ─── Constructor ──────────────────────────────────────────────
 
     constructor(IPoolManager _manager, address _owner) SafeCallback(_manager) {
-    owner = _owner; 
-}
+        owner = _owner;
+    }
 
     // ─── IHooks stubs ─────────────────────────────────────────────
 
@@ -193,7 +191,7 @@ contract PhiHook is IHooks, SafeCallback {
                 params.tickLower, params.tickUpper,
                 delta.amount0(),
                 uint128(uint256(-int256(params.liquidityDelta))),
-                key.currency0.toId()   // FIX 1: pass actual currency — was missing, caused mint(…,0,fee)
+                key.currency0.toId()
             )
         );
     }
@@ -428,7 +426,6 @@ contract PhiHook is IHooks, SafeCallback {
     }
 
     /// @param currencyId  key.currency0.toId() — passed from afterRemoveLiquidity.
-    ///                    FIX 1: was hard-coded 0 (= native ETH) in all non-ETH pools.
     function _afterRemoveCore(
         address sender, bytes32 poolId,
         int24   tickLower, int24 tickUpper,
@@ -446,7 +443,7 @@ contract PhiHook is IHooks, SafeCallback {
             fee = (uint256(int256(proceeds0)) * feeBps) / 10_000;
             if (fee > 0) {
                 rewardPools[poolId].addReward(fee);
-                poolManager.mint(address(this), currencyId, fee); // FIX 1: was (…, 0, fee)
+                poolManager.mint(address(this), currencyId, fee);
                 emit RewardAdded(poolId, fee, "early_exit");
                 emit EarlyExitFeeCharged(sender, posKey, feeBps, fee);
             }
