@@ -82,9 +82,9 @@ of an LP who holds for 60 days — with identical liquidity.
 
 ### 3. Protocol Fee Split
 
-38.2% of swap fees flow to the reward pool.
+61.8% of swap fees flow to the reward pool.
 
-Why 38.2%? It is `1/φ²` — the golden ratio Fibonacci retracement level.  
+The remaining 38.2% goes to treasury (`1/φ²`) — the golden-ratio retracement level.  
 The protocol speaks one mathematical language throughout.
 
 ```
@@ -118,7 +118,7 @@ PhiHook.sol          ← Uniswap V4 Hook
 ```
 
 **Hook flags:** `afterAddLiquidity` + `beforeRemoveLiquidity` +  
-`afterRemoveLiquidity` + `afterSwap` = `0x6C1`
+`afterRemoveLiquidity` + `afterSwap` = `0x641`
 
 **No token. No oracle. No governance. No admin key for math constants.**
 
